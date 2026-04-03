@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #define MAX_TEMPO_CPU 10
+#define NUM_RECURSOS 3
 
 struct filho
 {
@@ -31,7 +32,7 @@ struct fila
     processo *inicio;
     processo *fim;
     int qtde;
-    int finalidade; // 0 = Pronto   1 = Espera   2 = Execuçao
+    int finalidade; // 0 = Pronto   1 = Execucao
 };
 
 
@@ -151,21 +152,96 @@ void liberar_filhos(processo *p)
         p->possui_filho = 0;
 }
 
+int recursos_vazios(fila *fila_recurso[])
+{
+    for(int i = 0; i < NUM_RECURSOS; i++)
+    {
+        if(!fila_vazia(fila_recurso[i]->qtde))
+            return 0; // ainda existe processo esperando
+    }
+    return 1; // todas estão vazias
+}
+
+const char* qual_finalidade(fila *f)
+{
+    if(f->finalidade == 0)
+        return "PRONTO";
+    else if(f->finalidade == 1)
+        return "EXECUCAO";
+    else
+        return "ESPERA";
+}
+
+const char* qual_recurso(int recurso)
+{
+    if(recurso == 0)
+        return "HD";
+    else if(recurso == 1)
+        return "TECLADO";
+    else
+        return "MOUSE";
+}
+
 void exibir_fila(fila *f)
 {
     processo *aux = f->inicio;
-
-    if(fila_vazia(f->qtde))
-    {
-        printf("\nFila vazia.\n");
-        return;
-    }
-
-    printf("\nFila (finalidade = %d):\n", f->finalidade);
-
+    printf("\nFila %s:\n", qual_finalidade(f));
     while(aux != NULL)
     {
-        printf("PID: %d | Tempo Total: %d | Executado: %d\n", aux->pid, aux->tempo_total, aux->tempo_executado);
+        printf("PID: %d | Tempo Total: %d | Executado: %d || Tempo que falta: %d\n", aux->pid, aux->tempo_total, aux->tempo_executado, aux->tempo_total-aux->tempo_executado);
         aux = aux->prox;
+    }
+}
+
+// Verifica se terminou e para qual fila vai entrar
+void executar_processo(fila *pronto,fila *exec,fila *fila_recurso[])
+{
+    processo *p = remover_da_fila(exec);
+
+    int restante = p->tempo_total - p->tempo_executado;
+    // verifica se já executou tudo ou se nao pega o restante que falta para executar
+    int tempo_exec = (restante > MAX_TEMPO_CPU) ? MAX_TEMPO_CPU : restante;
+    printf("\nExecutando processo %d por %d UT\n", p->pid, tempo_exec);
+    p->tempo_executado += tempo_exec;
+
+    if(p->tempo_executado >= p->tempo_total) //verifica se já executou tudo
+    {
+        printf("Processo %d finalizou\n", p->pid);
+        delete p;
+    }
+    else
+    {
+        int bloqueia = rand() % 100; // sorteia se vai bloquear por recurso
+        if(bloqueia < 30)
+        {
+            int recurso = rand() % NUM_RECURSOS; // sorteia qual o recurso que precisa
+            printf("Processo %d bloqueou esperando %s\n", p->pid, qual_recurso(recurso));
+            inserir_na_fila(fila_recurso[recurso], p);
+        }
+        else
+        {
+            printf("Processo %d voltou para PRONTO\n", p->pid);
+            inserir_na_fila(pronto, p);
+        }
+    }
+}
+
+// Verifica se o processo vai ser desbloqueado (to fazendo por sorteio, n sei se é assim)
+void verificar_desbloqueio(fila *fila_recurso[], fila *pronto)
+{
+    for(int i = 0; i < NUM_RECURSOS; i++)
+    {
+        if(!fila_vazia(fila_recurso[i]->qtde))
+        {
+            processo *p = remover_da_fila(fila_recurso[i]);
+            int desbloqueia = rand() % 100;
+            if(desbloqueia < 40)
+            {
+                printf("Processo %d desbloqueou do recurso %s\n", p->pid, qual_recurso(i));
+                inserir_na_fila(pronto, p);
+            }
+            else
+                inserir_na_fila(fila_recurso[i], p);
+        }
     }
 }
