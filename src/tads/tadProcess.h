@@ -22,6 +22,7 @@ struct processo
  
     int tempo_espera;
     int tempo_bloqueado;
+    int tempo_wait; 
  
     int tempo_inicio;
     int tempo_fim;
@@ -117,6 +118,7 @@ processo *criar_processo(int pid, int tempo_total, int tempo_sistema)
  
     novo->tempo_espera   = 0;
     novo->tempo_bloqueado = 0;
+    novo->tempo_wait = 0;
  
     novo->tempo_inicio = tempo_sistema;
     novo->tempo_fim    = 0;
@@ -200,6 +202,8 @@ const char* qual_finalidade(fila *f)
         return "PRONTO";
     else if(f->finalidade == 1)
         return "EXECUCAO";
+    else if(f->finalidade == 10)
+        return "FINALIZADOS";
     else
         return "ESPERA";
 }
@@ -291,7 +295,7 @@ void exibir_fila_espera_filho(fila *f_filho, int tempo_sistema)
     
 }
  
-void exibir_estado_sistema(fila *pronto, fila *execucao, fila *fila_recurso[],fila *fila_espera_filho, int tempo_sistema)
+void exibir_estado_sistema(fila *pronto, fila *execucao, fila *fila_recurso[],fila *fila_espera_filho, fila *finalizado, int tempo_sistema)
 {
     printf("\n\n=================================\n");
     printf("TEMPO DO SISTEMA: %d\n", tempo_sistema);
@@ -300,6 +304,7 @@ void exibir_estado_sistema(fila *pronto, fila *execucao, fila *fila_recurso[],fi
     exibir_fila(pronto, tempo_sistema);
     exibir_fila(execucao, tempo_sistema);
     exibir_filas_recurso(fila_recurso, tempo_sistema);
+    exibir_fila(finalizado, tempo_sistema);
     exibir_fila_espera_filho(fila_espera_filho, tempo_sistema);
  
     printf("\n=================================\n");
@@ -319,7 +324,9 @@ void imprimir_metricas_processos_fila(fila *f, int tempo_sistema)
         printf("Tempo bloqueado: %d\n", p->tempo_bloqueado);
 
         if(p->qtde_filhos > 0)
-            printf("Filhos criados: %d\n", p->qtde_filhos);
+           printf("PID:%d | Filhos criados:%d | Tempo esperando filhos:%d UT\n", p->pid, p->qtde_filhos,
+            p->tempo_wait
+            );
         else
             printf("Filhos criados: 0\n");
 
@@ -372,7 +379,6 @@ void fazer_wait(processo *pai, fila *fila_espera_filho, int tempo_sistema)
 {
     pai->esperando_filho  = 1; 
     pai->entrou_bloqueado = tempo_sistema; //quando esta em espera
-    pai->tempo_bloqueado += 0; 
  
     printf("[WAIT] Processo %d entrou em WAIT no tempo %d (aguardando filhos)\n",
            pai->pid, tempo_sistema);
@@ -398,7 +404,10 @@ void verificar_termino_filho(fila *fila_espera_filho, fila *pronto,int pid_filho
             // só acorda se nao tem mais filhos vivos
             if (!p->possui_filho)
             {
-                p->tempo_bloqueado += tempo_sistema - p->entrou_bloqueado;
+                int tempo = tempo_sistema - p->entrou_bloqueado;
+                p->tempo_wait += tempo;
+                p->tempo_bloqueado += tempo;
+
                 p->esperando_filho  = 0;
                 p->entrou_pronto  = tempo_sistema;
                 p->criou_filho = 0;
@@ -422,15 +431,25 @@ void verificar_termino_filho(fila *fila_espera_filho, fila *pronto,int pid_filho
 
 
 
-int executar_processo(fila *pronto, fila *exec, fila *fila_recurso[], fila *fila_espera_filho, int tempo_sistema, int &pid_counter, int *proc_finalizados, int *proc_exec_prontos, int *qtde_bloqueados, fila *finalizados)
+int executar_processo(
+    fila *pronto,
+    fila *exec,
+    fila *fila_recurso[],
+    fila *fila_espera_filho,
+    int tempo_sistema,
+    int &pid_counter,
+    int *proc_finalizados,
+    int *proc_exec_prontos,
+    int *qtde_bloqueados,
+    fila *finalizados)
 {
     processo *p = remover_da_fila(exec);
 
-    // Se já criou filho e ainda não fez wait, entra em wait imediatamente
+    // se tem filho ativo e ainda não fez wait
     if (p->criou_filho && !p->esperando_filho && p->possui_filho)
     {
         fazer_wait(p, fila_espera_filho, tempo_sistema);
-        return 0; // não executa 
+        return 0; //nao executa
     }
 
     int restante = p->tempo_total - p->tempo_executado;
@@ -441,23 +460,36 @@ int executar_processo(fila *pronto, fila *exec, fila *fila_recurso[], fila *fila
     p->tempo_executado += tempo_exec;
     int tempo_atual = tempo_sistema + tempo_exec;
 
-    // processo finalizou
+    // PROCESSO TERMINOU CPU
     if (p->tempo_executado >= p->tempo_total)
     {
-        // Se é filho, avisa o pai que estava em wait
-        if (p->pid_pai != -1)
+        // se ainda tem filhos ativos, precisa esperar
+        if (p->possui_filho)
         {
-            printf("Processo filho %d finalizou (pai=%d)\n", p->pid, p->pid_pai);
-            verificar_termino_filho(fila_espera_filho, pronto, p->pid, p->pid_pai, tempo_atual);
+            fazer_wait(p, fila_espera_filho, tempo_atual);
         }
         else
-            printf("Processo %d finalizou\n", p->pid);
+        {
+            if (p->pid_pai != -1)
+            {
+                printf("Processo filho %d finalizou (pai=%d)\n", p->pid, p->pid_pai);
+                verificar_termino_filho(
+                    fila_espera_filho,
+                    pronto,
+                    p->pid,
+                    p->pid_pai,
+                    tempo_atual);
+            }
+            else
+            {
+                printf("Processo %d finalizou\n", p->pid);
+            }
+            (*proc_finalizados)++;
+            p->tempo_fim = tempo_atual;
+            p->tempo_total_execucao = p->tempo_fim - p->tempo_inicio;
 
-        (*proc_finalizados)++;
-        p->tempo_fim = tempo_atual;
-        p->tempo_total_execucao = p->tempo_fim - p->tempo_inicio;
-        inserir_na_fila(finalizados, p);
-        delete p;
+            inserir_na_fila(finalizados, p);
+        }
     }
     else
     {
@@ -467,26 +499,27 @@ int executar_processo(fila *pronto, fila *exec, fila *fila_recurso[], fila *fila
         // FORK
         if (sorteio < 30 && !p->criou_filho && !p->esperando_filho)
         {
-            // Faz o fork criando o filho e colocando ele em pronto
             processo *filho_proc = fazer_fork(p, pid_counter, tempo_atual);
             inserir_na_fila(pronto, filho_proc);
- 
             fazer_wait(p, fila_espera_filho, tempo_atual);
         }
 
-        // bloqueia por recurso
+        // BLOQUEIO POR RECURSO
         else if (sorteio >= 30 && sorteio < 60 && !p->esperando_filho)
         {
             int recurso = rand() % NUM_RECURSOS;
 
-            printf("[BLOCK] Processo %d bloqueou esperando %s no tempo %d\n", p->pid, qual_recurso(recurso), tempo_atual);
-            
+            printf("[BLOCK] Processo %d bloqueou esperando %s no tempo %d\n",
+                   p->pid,
+                   qual_recurso(recurso),
+                   tempo_atual);
+
             (*qtde_bloqueados)++;
             p->entrou_bloqueado = tempo_atual;
             inserir_na_fila(fila_recurso[recurso], p);
         }
 
-        //volta pra pronto
+        // VOLTA PARA PRONTO
         else
         {
             printf("Processo %d voltou para PRONTO\n", p->pid);
@@ -495,6 +528,7 @@ int executar_processo(fila *pronto, fila *exec, fila *fila_recurso[], fila *fila
             inserir_na_fila(pronto, p);
         }
     }
+
     return tempo_exec;
 }
 

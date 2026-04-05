@@ -48,10 +48,11 @@ int main()
       (!fila_vazia(fila_pronto->qtde) ||
        !fila_vazia(fila_execucao->qtde) ||
        !fila_vazia(fila_espera_filho->qtde) ||
-       !recursos_vazios(fila_espera_recurso)))
+       !recursos_vazios(fila_espera_recurso) || 
+        !fila_vazia(fila_espera_filho->qtde)))
     {
         if (!fila_vazia(fila_pronto->qtde))
-            exibir_estado_sistema(fila_pronto, fila_execucao,fila_espera_recurso, fila_espera_filho, tempo_sistema);
+            exibir_estado_sistema(fila_pronto, fila_execucao,fila_espera_recurso, fila_espera_filho, fila_finalizados, tempo_sistema);
  
         verificar_desbloqueio(fila_espera_recurso, fila_pronto, tempo_sistema, &tempo_total_bloqueado);
  
