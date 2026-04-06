@@ -2,8 +2,17 @@
 #include <stdlib.h>
 #include <ctime>
 #include <time.h>
-#include <conio.h>
+#ifdef WIN32
+    #include <windows.h>
+    #define sleep(x) Sleep(x * 1000);
+    #include "./headers/conio/conio-dos.h"
+    #include "./headers/conio/meuconio.h"
+#else
+    #include "./conio/conio-unix.h"
+#endif
 #include "tads/tadProcess.h"
+#include "moldura/dashboard.h" 
+
 
 int main()
 {
@@ -43,7 +52,7 @@ int main()
     }
 
     printf("---Inicio da simulacao---\n");
- 
+    float tmed ;
     while (!encerrar &&
       (!fila_vazia(fila_pronto->qtde) ||
        !fila_vazia(fila_execucao->qtde) ||
@@ -51,9 +60,15 @@ int main()
        !recursos_vazios(fila_espera_recurso) || 
         !fila_vazia(fila_espera_filho->qtde)))
     {
+         tmed = qtde_bloqueados > 0
+             ? (float)tempo_total_bloqueado / qtde_bloqueados
+             : 0;
         if (!fila_vazia(fila_pronto->qtde))
-            exibir_estado_sistema(fila_pronto, fila_execucao,fila_espera_recurso, fila_espera_filho, fila_finalizados, tempo_sistema);
- 
+              dashboard_exibir(fila_pronto, fila_execucao, fila_espera_recurso,
+                 fila_espera_filho, fila_finalizados,
+                 tempo_sistema,
+                 proc_finalizados, proc_exec_prontos,
+                 qtde_bloqueados, tmed);
         verificar_desbloqueio(fila_espera_recurso, fila_pronto, tempo_sistema, &tempo_total_bloqueado);
  
         // Se nao tiver nada executando, pega da fila de pronto
@@ -83,6 +98,7 @@ int main()
             if (tecla == 13) // ENTER
                 printf("Enter pressionado\n");
         }
+        sleep(1);
     }
 
     float tempo_medio_bloqueio = 0;
@@ -90,12 +106,11 @@ int main()
         tempo_medio_bloqueio = tempo_total_bloqueado / qtde_bloqueados;
  
     printf("\n---Fim da simulacao--- Tempo total: %d\n", tempo_sistema);
-
-    printf("\n===== METRICAS =====\n");
-    printf("Quantidade de processos finalizados: %d\n", proc_finalizados);
-    printf("Quantidade de processos bloqueados: %d\n", qtde_bloqueados);
-    printf("Tempo medio de bloqueio: %.2f UT\n", tempo_medio_bloqueio);
-    printf("Quantidade de processos ficaram entre os estados de Execucao e Pronto: %d\n", proc_exec_prontos);
+    dashboard_exibir(fila_pronto, fila_execucao, fila_espera_recurso,
+                 fila_espera_filho, fila_finalizados,
+                 tempo_sistema,
+                 proc_finalizados, proc_exec_prontos,
+                 qtde_bloqueados, tmed);
 
     printf("\n===== TEMPO DE EXECUCAO DOS PROCESSOS =====\n");
     imprimir_processos_restantes(
@@ -105,7 +120,7 @@ int main()
         fila_espera_filho,
         fila_finalizados,
         tempo_sistema);
-
+       
 
     return 0;
 }
